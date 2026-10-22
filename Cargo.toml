@@ -1,5 +1,5 @@
 [package]
-name = "fast-tab-click"
+name = "win-pingpang-tab"
 version = "0.1.0"
 edition = "2021"
 description = "Alt+右键穿透激活鼠标下方被盖窗口的 Windows 切换工具"
