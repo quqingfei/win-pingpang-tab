@@ -99,8 +99,8 @@ pub fn is_elevated() -> bool {
     }
 }
 
-/// %APPDATA%\fast-tab-click：配置文件 / 自定义图标等用户级文件的根目录（§4.7）。
+/// %APPDATA%\win-pingpang-tab：配置文件 / 自定义图标等用户级文件的根目录（§4.7）。
 pub fn app_dir() -> std::path::PathBuf {
     let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
-    std::path::Path::new(&appdata).join("fast-tab-click")
+    std::path::Path::new(&appdata).join("win-pingpang-tab")
 }

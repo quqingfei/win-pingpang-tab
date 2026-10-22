@@ -51,7 +51,7 @@ fn main() {
     // 4. 权限自检（M2 补气泡提示与一键自提升）
     let elevated = util::is_elevated();
     info!(
-        "FastTabClick v{} 启动 | 权限: {}",
+        "WinPingPangTabv{} 启动 | 权限: {}",
         env!("CARGO_PKG_VERSION"),
         if elevated { "管理员" } else { "普通（管理员窗口前台时触发键会失效，详见文档 §4.8）" }
     );
@@ -93,7 +93,7 @@ fn main() {
         .collect::<Vec<_>>()
         .join("+");
     let btn_disp = display_button(&cfg.button);
-    info!("FastTabClick 已就绪：按住 {mods_disp} + {btn_disp} 穿透激活鼠标下方被盖窗口");
+    info!("WinPingPangTab已就绪：按住 {mods_disp} + {btn_disp} 穿透激活鼠标下方被盖窗口");
 
     // 8. 主线程 = 托盘消息循环（阻塞直至用户右键托盘选择退出）
     let tip = format!("FastTabClick：{mods_disp}+{btn_disp} 穿透切换 | 右键托盘图标打开菜单");
@@ -112,7 +112,7 @@ fn main() {
     }
     let _ = hook_thread.join();
     // 工作线程阻塞在 channel recv（Sender 驻留 OnceLock）——随进程结束终止
-    info!("FastTabClick 已退出");
+    info!("WinPingPangTab已退出");
 }
 
 /// 配置字符串 → 触发配置（VK/消息号/X 键位）；无法识别的项记日志并回落默认（§5.1）。

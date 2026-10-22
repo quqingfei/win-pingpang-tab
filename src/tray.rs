@@ -264,7 +264,7 @@ fn load_tray_icon() -> HICON {
             return h;
         }
     }
-    // 2. 配置目录 icon.ico（%APPDATA%\fast-tab-click\，写权限永远可用）
+    // 2. 配置目录 icon.ico（%APPDATA%\win-pingpang-tab\，写权限永远可用）
     if let Some(h) =
         load_icon_from_file(&crate::util::app_dir().join("icon.ico"), "配置目录 icon.ico")
     {

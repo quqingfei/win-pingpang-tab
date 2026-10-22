@@ -1,4 +1,4 @@
-//! 配置文件（技术设计 §5）：%APPDATA%\fast-tab-click\config.toml。
+//! 配置文件（技术设计 §5）：%APPDATA%\win-pingpang-tab\config.toml。
 //! 四原则：单一来源 / 文件即文档 / 容错不拒启 / 重启生效。
 //! 落地状态（2026-10-22）：[trigger]/[blacklist]/[log] 已接入；
 //! [privilege] 随自提升功能接入（模板暂未包含，防误配）。
@@ -35,7 +35,7 @@ pub fn config_path() -> PathBuf {
 
 /// 默认模板（文件即文档：带中文注释，首次运行生成）。
 pub const DEFAULT_TEMPLATE: &str = r#"# ==============================================================
-#  FastTabClick 配置文件
+#  WinPingPangTab配置文件
 #  修改保存后重启程序生效：托盘右键 → 退出 → 重新启动
 # ==============================================================
 

@@ -67,10 +67,10 @@ impl MakeWriter<'_> for SizeLimitedWriter {
     }
 }
 
-/// 日志目录：%APPDATA%\fast-tab-click\logs\
+/// 日志目录：%APPDATA%\win-pingpang-tab\logs\
 pub fn log_dir() -> PathBuf {
     let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".into());
-    Path::new(&appdata).join("fast-tab-click").join("logs")
+    Path::new(&appdata).join("win-pingpang-tab").join("logs")
 }
 
 /// 初始化全局日志（级别/上限来自配置文件，§5/§7；调用方已保证值合法）。

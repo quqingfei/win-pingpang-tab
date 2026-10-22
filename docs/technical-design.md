@@ -1,4 +1,4 @@
-# FastTabClick 技术设计文档（v0.1 草案，待核对）
+# WinPingPangTab技术设计文档（v0.1 草案，待核对）
 
 对应需求：`docs/requirements-analysis.md`（含 2026-10-22 已确认决策）。
 目标版本：**V1.0 MVP** — 左Alt+右键激活鼠标下方第二层被盖窗口，托盘可控，无主窗口。
@@ -78,7 +78,7 @@ src/
 ├── tray.rs        托盘图标 + 菜单（暂停/恢复、开机自启动勾选、退出）
 ├── autostart.rs   HKCU\...\Run 注册表读写
 ├── proc_cache.rs  (hwnd_root → 进程名) 惰性缓存；重查询仅当缓存 miss
-└── util.rs        错误类型、单实例命名互斥体、路径（%APPDATA%\fast-tab-click\）
+└── util.rs        错误类型、单实例命名互斥体、路径（%APPDATA%\win-pingpang-tab\）
 ```
 
 依赖方向：`hook → proc_cache`，`switcher → stack → proc_cache`，`main → 全部`。`stack.rs` 的几何/排序逻辑不触碰 Win32 的部分抽成纯函数以便单测。
@@ -181,7 +181,7 @@ Windows 对鼠标坐标与窗口矩形统一使用"虚拟屏幕"坐标系——�
 
 ### 4.5 开机自启动（autostart.rs，托盘菜单勾选式）
 
-注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 写 `FastTabClick = "<exe 全路径>"`，取消勾选则删值。不需要管理员权限。
+注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 写 `WinPingPangTab= "<exe 全路径>"`，取消勾选则删值。不需要管理员权限。
 
 ### 4.6 优雅退出
 
@@ -223,7 +223,7 @@ Windows 对鼠标坐标与窗口矩形统一使用"虚拟屏幕"坐标系——�
 | 优先级 | 来源 | 说明 |
 |---|---|---|
 | 1 | exe 同目录 `icon.ico` | 便携使用友好 |
-| 2 | `%APPDATA%\fast-tab-click\icon.ico` | 写权限永远可用（推荐位置） |
+| 2 | `%APPDATA%\win-pingpang-tab\icon.ico` | 写权限永远可用（推荐位置） |
 | 3 | 内嵌默认图标 | `assets/icon.png`（32×32，托盘标准小图标尺寸，覆盖 100%~200% DPI）经 `include_bytes!` 编译进二进制，启动时 PNG 解码 → `CreateIconIndirect`，无需资源编译器 |
 | 4 | 系统默认 `IDI_APPLICATION` | 兜底 |
 
@@ -231,7 +231,7 @@ Windows 对鼠标坐标与窗口矩形统一使用"虚拟屏幕"坐标系——�
 - exe 文件图标（Explorer 显示）由 `build.rs` + `winresource` 嵌入 `assets/icon.ico`（windres，尽力而为：资源编译器缺失时仅 cargo:warning 不阻断构建，托盘图标不受影响）；
 - 日志记录实际加载来源，排查"图标不对"直接看日志。
 
-## 5. 配置文件（%APPDATA%\fast-tab-click\config.toml）
+## 5. 配置文件（%APPDATA%\win-pingpang-tab\config.toml）
 
 **设计原则（2026-10-22 需求确认：通用/默认配置统一置于配置文件）**：
 1. **单一来源**：所有用户可调项只放这一个文件——触发键位、进程黑名单、权限策略、日志级别与大小上限；不散落注册表/多文件（两个例外：开机自启动是托盘勾选项存 HKCU Run，见 §4.5；自定义图标走 `icon.ico` 文件约定，见 §4.9）；
@@ -328,7 +328,7 @@ opt-level = "s"
 ## 7. 日志与错误处理
 
 **日志（V1 默认开启，用于事后排查）**
-- `tracing` + 单文件 `%APPDATA%\fast-tab-click\logs\app.log`，默认 `level=info`——出问题无需事先调配置就有现场可查；
+- `tracing` + 单文件 `%APPDATA%\win-pingpang-tab\logs\app.log`，默认 `level=info`——出问题无需事先调配置就有现场可查；
 - info 级记录：启动/退出、配置加载结果（含非法回落）、钩子安装/摘除、每次切换（命中点、目标窗口句柄/进程名、激活结果）、激活失败及原因；排查"切错窗口"可临时调 debug（含该点完整窗口栈）；
 - **大小上限 10MB，超限清空重写**（需求指定）：自定义 `MakeWriter` 维护已写字节计数（AtomicU64），写前检查，超过 `max_size_mb`（默认 10，可配置）即 `File::set_len(0)` 截断后继续顺序写。单文件、不滚动归档，实现最简且磁盘占用恒定；
   - 截断语义：写前检查意味着文件短暂超限至 max + 最后一条（~200B，0.002%），换来**最后一条日志永远完整**；
