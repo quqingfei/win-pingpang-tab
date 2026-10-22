@@ -1,4 +1,4 @@
-# FastTabClick / WinTabRightClick
+# WinTabRightClick
 
 一款 Windows 后台窗口快速切换工具：**按住组合键 + 鼠标键，直接把鼠标下方被盖住的窗口切到最前**——不需要先最小化/移开当前窗口，也不需要精准点中目标窗口露出的那一小条。
 
