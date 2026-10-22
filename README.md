@@ -1,4 +1,4 @@
-# WinTabRightClick
+# WinPingPangTab
 
 一款 Windows 后台窗口快速切换工具：**左alt + 鼠标右键，直接把鼠标下方被盖住的窗口切到最前**——不需要先最小化/移开当前窗口，也不需要精准点中目标窗口露出的那一小条。
 
@@ -10,7 +10,7 @@ FastTabClick 的思路：**窗口在屏幕上的位置你已经知道，直接�
 
 ## 使用方式
 
-1. 运行 `fast-tab-click.exe`（程序常驻后台，任务栏托盘出现图标）；
+1. 运行 `win-pingpang-tab.exe`（程序常驻后台，任务栏托盘出现图标）；
 2. 鼠标移到被盖住的目标窗口区域上（哪怕被前台窗口完全盖住也行，只要你知道它在那）；
 3. **按住左 Alt + 点右键**，松开即切换：目标窗口立刻激活置前；
 4. 在同一位置再次触发，两窗口来回乒乓切换。
@@ -25,7 +25,7 @@ FastTabClick 的思路：**窗口在屏幕上的位置你已经知道，直接�
 
 ## 触发键自定义（config.toml）
 
-配置文件位于 `%APPDATA%\fast-tab-click\config.toml`，修改后重启程序生效：
+配置文件位于 `%APPDATA%\win-pingpang-tab\config.toml`，修改后重启程序生效：
 
 ```toml
 [trigger]
@@ -52,16 +52,16 @@ max_size_mb = 10      # 日志超上限自动清空重写
 - **多显示器/混合 DPI**：Per-Monitor Aware v2，任意屏、任意缩放下命中准确；
 - **窗口跨屏拖动**：无状态设计，窗口拖到哪里就在哪里被找到；
 - **单实例**：重复启动自动退出，不会装多个钩子；
-- **日志**：`%APPDATA%\fast-tab-click\logs\app.log`，每次切换均有记录，10 MB 超限清空。
+- **日志**：`%APPDATA%\win-pingpang-tab\logs\app.log`，每次切换均有记录，10 MB 超限清空。
 
 ## 下载与构建
 
-- **直接使用**：从 [Releases](https://gitee.com/quqingfei/win-tab-rightclick/releases) 下载 exe 即可；
+- **直接使用**：从 [Releases](https://gitee.com/quqingfei/win-pingpang-tab/releases) 下载 exe 即可；
 - **源码构建**：安装 [Rust](https://rustup.rs/) 后执行：
 
 ```bash
 cargo build --release
-# 产物：target\release\fast-tab-click.exe
+# 产物：target\release\win-pingpang-tab.exe
 ```
 
 ## 已知限制
