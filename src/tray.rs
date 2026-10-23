@@ -32,6 +32,7 @@ const WM_TRAY_CALLBACK: u32 = WM_APP + 1;
 const IDM_EXIT: usize = 1001;
 const IDM_CONFIG: usize = 1002;
 const IDM_AUTOSTART: usize = 1003;
+const IDM_LOGS: usize = 1004;
 
 /// 已加载托盘图标（0 = 系统共享图标，不销毁）；owned 标记需要 DestroyIcon 的自持句柄。
 static TRAY_ICON: AtomicIsize = AtomicIsize::new(0);
@@ -126,6 +127,7 @@ unsafe extern "system" fn tray_wndproc(
                 }
                 IDM_CONFIG => open_config(),
                 IDM_AUTOSTART => toggle_autostart(),
+                IDM_LOGS => open_log_dir(),
                 _ => {}
             }
             LRESULT(0)
@@ -147,13 +149,14 @@ unsafe fn show_menu(hwnd: HWND) {
         error!("CreatePopupMenu 失败");
         return;
     };
-    let items: [(&str, usize, bool); 3] = [
+    let items: [(&str, usize, bool); 4] = [
         ("配置文件", IDM_CONFIG, false),
+        ("查看日志", IDM_LOGS, false),
         ("开机自启动", IDM_AUTOSTART, crate::autostart::is_enabled()),
         ("退出 WinPingPangTab", IDM_EXIT, false),
     ];
     for (i, (text, id, checked)) in items.iter().enumerate() {
-        if i == 2 {
+        if i == 3 {
             // 分隔线隔开「退出」，降低误点
             if let Err(e) = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()) {
                 error!("AppendMenuW(分隔线) 失败: {e}");
@@ -242,6 +245,34 @@ fn open_config() {
     };
     if r2.0 as isize <= 32 {
         error!("打开配置文件失败: {}", std::io::Error::last_os_error());
+    }
+}
+
+/// 托盘菜单「查看日志」：在资源管理器中打开日志目录（%APPDATA%\win-pingpang-tab\logs\），
+/// 用户自行选择查看方式。目录不存在时先创建（日志初始化正常时不会发生，防御性兜底）。
+fn open_log_dir() {
+    let dir = crate::logging::log_dir();
+    if !dir.is_dir() {
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            error!("创建日志目录失败: {e}");
+            return;
+        }
+    }
+    let dir_str = dir.to_string_lossy().to_string();
+    let verb = wstr("open");
+    let path = wstr(&dir_str);
+    let r = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(verb.as_ptr()),
+            PCWSTR(path.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if r.0 as isize <= 32 {
+        error!("打开日志目录失败: {}", std::io::Error::last_os_error());
     }
 }
 
