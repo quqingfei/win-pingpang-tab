@@ -168,10 +168,13 @@ fn is_above(target: HWND, cover: HWND) -> bool {
     }
 }
 
-/// 收起单个窗口：把 target 放回 cover 之下（Z 序），不激活、不移动、不改尺寸。
+/// 收起单个窗口：把 target 放回 cover 之下（Z 序），不移动、不改尺寸。
+/// 若 target 是当前前台（收起后会被埋在 cover 之下），把前台转交给 cover——
+/// 否则前台句柄指向被埋窗口，下一轮「跳过前台层」规则会误跳它，
+/// 两个全屏窗口对切时第三按起永久卡死（2026-10-23 实测）。
 fn restore_below(target: isize, cover: isize) -> bool {
     unsafe {
-        SetWindowPos(
+        let ok = SetWindowPos(
             HWND(target as _),
             Some(HWND(cover as _)),
             0,
@@ -180,7 +183,14 @@ fn restore_below(target: isize, cover: isize) -> bool {
             0,
             SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER,
         )
-        .is_ok()
+        .is_ok();
+        if !ok {
+            return false;
+        }
+        if GetForegroundWindow() == HWND(target as _) {
+            activate(HWND(cover as _));
+        }
+        true
     }
 }
 
