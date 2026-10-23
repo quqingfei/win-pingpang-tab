@@ -27,7 +27,7 @@ unsafe impl Sync for SingleInstance {}
 impl SingleInstance {
     /// 尝试成为唯一实例。返回 Err(()) 表示已有实例在运行。
     pub fn acquire() -> Result<Self, ()> {
-        let name: Vec<u16> = "Local\\FastTabClick.SingleInstance"
+        let name: Vec<u16> = "Local\\WinPingPangTab.SingleInstance"
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();

@@ -1,5 +1,6 @@
-//! 工作线程（技术设计 §1.1/§4.1）：接收激活请求，构建窗口栈，
-//! 选择第二层，AttachThreadInput 绕过前台锁激活；失败降级闪烁。
+//! 工作线程（技术设计 §1.1/§3/§4.1）：接收激活请求，构建窗口栈，选目标并激活。
+//! 维护「翻出状态」：同位置逐层下挖；无目标时收起全部；
+//! 跨位置一次触发 = 收起旧位置翻出窗口 + 翻出新目标。
 
 use std::sync::mpsc::Receiver;
 
@@ -10,59 +11,131 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     keybd_event, KEYBD_EVENT_FLAGS, VK_MENU, KEYEVENTF_KEYUP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, FlashWindowEx, GetForegroundWindow, GetWindowThreadProcessId,
-    SetForegroundWindow, FLASHWINFO, FLASHW_ALL,
+    BringWindowToTop, FlashWindowEx, GetForegroundWindow, GetWindow, GetWindowThreadProcessId,
+    IsIconic, IsWindow, SetForegroundWindow, SetWindowPos, FLASHW_ALL, FLASHWINFO, GW_HWNDPREV,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
 };
 
 use crate::proc_cache;
-use crate::stack;
+use crate::stack::{self, Raised};
 
 /// 钩子线程 → 工作线程的激活请求：使用按下瞬间的 pt（不用事后 GetCursorPos，防打偏）。
 pub struct ActivateRequest {
     pub pt: POINT,
 }
 
-/// 工作线程主循环。M1 硬编码：触发键 左Alt+右键，黑名单 mstsc.exe（在钩子侧放行）。
+/// 工作线程私有状态（单线程访问，无需同步）：翻出记录，按翻出顺序排列。
+struct SwitchState {
+    raised: Vec<Raised>,
+}
+
+/// 工作线程主循环。
 pub fn run(receiver: Receiver<ActivateRequest>) {
     info!("工作线程已启动");
+    let mut state = SwitchState { raised: Vec::new() };
     for req in receiver {
-        handle(req);
+        state.handle(req);
     }
     info!("工作线程退出（channel 已关闭）");
 }
 
-fn handle(req: ActivateRequest) {
-    let fg = unsafe { GetForegroundWindow() };
-    let fg_root = proc_cache::root_of(fg);
-    let hit = stack::build_stack(req.pt);
-    debug!("pt=({}, {}) 窗口栈(顶→底): {:?}", req.pt.x, req.pt.y, hit);
+impl SwitchState {
+    fn handle(&mut self, req: ActivateRequest) {
+        let fg = unsafe { GetForegroundWindow() };
+        let fg_root = proc_cache::root_of(fg);
+        let hit = stack::build_stack(req.pt);
+        debug!("pt=({}, {}) 窗口栈(顶→底): {:?}", req.pt.x, req.pt.y, hit);
 
-    // 目标：跳过最顶可见层（被穿透层），从第二层起取第一个非前台层（§3 规则）
-    let Some(target_raw) = stack::pick_target(&hit, fg_root.0 as isize) else {
-        info!(
-            "未切换: pt=({},{}) | 前台={} | 顶下无其他非前台窗口 | 栈(顶→底)=[{}]",
-            req.pt.x,
-            req.pt.y,
-            layer_name(fg_root),
-            layer_names(&hit)
-        );
-        return;
-    };
-    let target = proc_cache::root_of(HWND(target_raw as _));
-    let target_name = layer_name(target);
-    let fg_name = layer_name(fg_root);
+        // 1. 剪枝：清理已销毁/最小化/被用户手动盖回的翻出记录
+        self.prune();
 
-    let ok = activate(target);
-    if ok {
-        info!(
-            "切换成功: pt=({},{}) | {fg_name} → {target_name} (hwnd=0x{target_raw:X})"
-        , req.pt.x, req.pt.y);
-    } else {
-        warn!(
-            "切换失败(已闪烁): pt=({},{}) | {fg_name} → {target_name} (hwnd=0x{target_raw:X})",
-            req.pt.x,
-            req.pt.y
-        );
+        // 2. 选目标（§3：跳过前台、已翻出层、同链路盖层）
+        let Some(target_raw) = stack::pick_target(&hit, fg_root.0 as isize, &self.raised) else {
+            if self.raised.is_empty() {
+                info!(
+                    "未切换: pt=({},{}) | 前台={} | 顶下无其他可翻窗口 | 栈(顶→底)=[{}]",
+                    req.pt.x,
+                    req.pt.y,
+                    layer_name(fg_root),
+                    layer_names(&hit)
+                );
+            } else {
+                // 无可翻目标但有翻出窗口 → 全部收起（显示/隐藏乒乓）
+                self.restore_all(req.pt);
+            }
+            return;
+        };
+        let target = proc_cache::root_of(HWND(target_raw as _));
+        let target_name = layer_name(target);
+        let fg_name = layer_name(fg_root);
+
+        // 3. 跨位置：收起不在当前栈中的旧翻出窗口（一次触发 = 收旧 + 翻新）
+        let (keep, to_restore) = stack::split_by_stack(&self.raised, &hit);
+        let mut restored_names = Vec::new();
+        for r in to_restore {
+            if restore_below(r.target, r.cover) {
+                restored_names.push(layer_name(proc_cache::root_of(HWND(r.target as _))));
+            } else {
+                warn!("收起失败: hwnd=0x{:X}（放回盖层之下）", r.target);
+            }
+        }
+        self.raised = keep.into_iter().copied().collect();
+        let restore_note = if restored_names.is_empty() {
+            String::new()
+        } else {
+            format!(" | 同时收起: [{}]", restored_names.join(", "))
+        };
+
+        // 4. 激活新目标
+        let ok = activate(target);
+        if ok {
+            // 记录翻出：cover = 本次被穿透的栈顶盖层（收起时放回其下，还原原 Z 序）
+            self.raised
+                .push(Raised { target: target_raw, cover: hit[0] });
+            info!(
+                "切换成功: pt=({},{}) | {fg_name} → {target_name} (hwnd=0x{target_raw:X}){restore_note}",
+                req.pt.x, req.pt.y
+            );
+        } else {
+            warn!(
+                "切换失败(已闪烁): pt=({},{}) | {fg_name} → {target_name} (hwnd=0x{target_raw:X}){restore_note}",
+                req.pt.x, req.pt.y
+            );
+        }
+    }
+
+    /// 剪枝：target/cover 已销毁、target 已被用户最小化或手动盖回（Z 序低于其盖层）
+    /// 的记录清除——这些窗口已回到"未被工具翻出"的状态，后续触发重新翻出。
+    fn prune(&mut self) {
+        let before = self.raised.len();
+        self.raised.retain(|r| {
+            let (t, c) = (HWND(r.target as _), HWND(r.cover as _));
+            unsafe {
+                IsWindow(Some(t)).as_bool()
+                    && IsWindow(Some(c)).as_bool()
+                    && !IsIconic(t).as_bool()
+                    && is_above(t, c)
+            }
+        });
+        if self.raised.len() != before {
+            debug!("翻出记录剪枝: {} → {} 条", before, self.raised.len());
+        }
+    }
+
+    /// 收起全部翻出窗口：按翻出顺序放回各自盖层之下（还原原 Z 序）。
+    fn restore_all(&mut self, pt: POINT) {
+        let names: Vec<String> = self
+            .raised
+            .iter()
+            .map(|r| layer_name(proc_cache::root_of(HWND(r.target as _))))
+            .collect();
+        for r in &self.raised {
+            if !restore_below(r.target, r.cover) {
+                warn!("收起失败: hwnd=0x{:X}（放回盖层之下）", r.target);
+            }
+        }
+        info!("已收起: [{}] | pt=({},{})", names.join(", "), pt.x, pt.y);
+        self.raised.clear();
     }
 }
 
@@ -78,6 +151,37 @@ fn layer_names(stack: &[isize]) -> String {
         .map(|&h| layer_name(proc_cache::root_of(HWND(h as _))))
         .collect::<Vec<_>>()
         .join(" > ")
+}
+
+/// target 是否仍位于 cover 之上（Z 序为全局序）：从 target 向上遍历，
+/// 遇到 cover 即说明已被用户盖回；到栈顶仍未遇到则仍在 cover 之上。
+fn is_above(target: HWND, cover: HWND) -> bool {
+    let mut cur = target;
+    loop {
+        cur = match unsafe { GetWindow(cur, GW_HWNDPREV) } {
+            Ok(next) => next,
+            Err(_) => return true, // 到栈顶仍未遇到 cover → target 仍在 cover 之上
+        };
+        if cur == cover {
+            return false; // cover 在 target 之上 → 已被盖回
+        }
+    }
+}
+
+/// 收起单个窗口：把 target 放回 cover 之下（Z 序），不激活、不移动、不改尺寸。
+fn restore_below(target: isize, cover: isize) -> bool {
+    unsafe {
+        SetWindowPos(
+            HWND(target as _),
+            Some(HWND(cover as _)),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER,
+        )
+        .is_ok()
+    }
 }
 
 /// 激活目标窗口（技术设计 §4.1）：主方案 AttachThreadInput，fallback 模拟系统键，仍失败闪烁。

@@ -1,4 +1,4 @@
-//! FastTabClick：按住配置的组合键 + 鼠标键 → 激活鼠标下方被盖窗口。
+//! WinPingPangTab：按住配置的组合键 + 鼠标键 → 激活鼠标下方被盖窗口。
 //! 启动顺序（技术设计 §1.1）：DPI 声明 → 配置加载 → 日志 → 权限自检 → 单实例 → 线程 → 托盘。
 // 无界面工具：windows 子系统，双击启动不弹控制台窗口
 // （M1 实测：控制台窗口会作为可切换目标污染层叠栈——曾把自身控制台激活到前台）。
@@ -96,7 +96,7 @@ fn main() {
     info!("WinPingPangTab已就绪：按住 {mods_disp} + {btn_disp} 穿透激活鼠标下方被盖窗口");
 
     // 8. 主线程 = 托盘消息循环（阻塞直至用户右键托盘选择退出）
-    let tip = format!("FastTabClick：{mods_disp}+{btn_disp} 穿透切换 | 右键托盘图标打开菜单");
+    let tip = format!("WinPingPangTab：{mods_disp}+{btn_disp} 穿透切换 | 右键托盘图标打开菜单");
     tray::run(tip);
 
     // 9. 优雅退出：通知钩子线程 WM_QUIT（其循环退出并卸载钩子），join 后结束

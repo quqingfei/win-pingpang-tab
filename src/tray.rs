@@ -53,7 +53,7 @@ pub fn run(tip: String) {
                 return;
             }
         };
-        let class_name = wstr("FastTabClickTrayWnd");
+        let class_name = wstr("WinPingPangTabTrayWnd");
         let wc = WNDCLASSW {
             lpfnWndProc: Some(tray_wndproc),
             hInstance: hinstance.into(),
@@ -65,7 +65,7 @@ pub fn run(tip: String) {
             return;
         }
         // 普通顶层窗口（非 message-only），不 WS_VISIBLE 即隐藏——托盘回调要求
-        let window_name = wstr("FastTabClick");
+        let window_name = wstr("WinPingPangTab");
         let hwnd = match CreateWindowExW(
             WINDOW_EX_STYLE(0),
             PCWSTR(class_name.as_ptr()),
@@ -150,7 +150,7 @@ unsafe fn show_menu(hwnd: HWND) {
     let items: [(&str, usize, bool); 3] = [
         ("配置文件", IDM_CONFIG, false),
         ("开机自启动", IDM_AUTOSTART, crate::autostart::is_enabled()),
-        ("退出 FastTabClick", IDM_EXIT, false),
+        ("退出 WinPingPangTab", IDM_EXIT, false),
     ];
     for (i, (text, id, checked)) in items.iter().enumerate() {
         if i == 2 {

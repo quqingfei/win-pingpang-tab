@@ -1,5 +1,5 @@
-//! 窗口栈构建（技术设计 §3）：实时枚举命中鼠标点的窗口（按 Z 序从顶到底），
-//! 目标 = 可见顶层之下的第一层（stack[1]）。无状态、无记录、永远准确。
+//! 窗口栈构建（技术设计 §3）：实时枚举命中鼠标点的窗口（按 Z 序从顶到底）。
+//! 目标选择结合工作线程的「翻出状态」：跳过已翻出层与同链路盖层，逐层下挖。
 
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
@@ -34,11 +34,39 @@ pub fn point_in_rect(pt: POINT, r: RECT) -> bool {
     pt.x >= r.left && pt.x < r.right && pt.y >= r.top && pt.y < r.bottom
 }
 
-/// 目标选择（纯函数）：跳过最顶层（被穿透的可见层），从第二层起取
-/// 第一个「不是当前前台窗口」的层。前台层被跳过——激活已是前台的窗口
-/// 没有任何可见变化（M1 实测：钉钉置顶迷你窗下 stack[1] 常为前台窗口）。
-pub fn pick_target(stack: &[isize], fg_root: isize) -> Option<isize> {
-    stack.iter().skip(1).copied().find(|&h| h != fg_root)
+/// 工作线程的翻出记录：target = 已翻出窗口，cover = 翻出时被穿透的栈顶盖层。
+/// 收起 = 把 target 放回 cover 之下（还原原 Z 序）。
+#[derive(Debug, Clone, Copy)]
+pub struct Raised {
+    pub target: isize,
+    pub cover: isize,
+}
+
+/// 目标选择（纯函数）：跳过最顶层（被穿透的盖层），从第二层起取第一个
+/// 满足以下全部条件的层：
+/// - 非当前前台窗口：激活已是前台的窗口无可见变化（M1 实测：钉钉置顶
+///   迷你窗下 stack[1] 常为前台窗口）；
+/// - 非已翻出层：窗口已在最前，重复激活无意义，应继续下挖更深层；
+/// - 非同链路盖层：盖层的翻出窗口仍在当前栈中时，重新翻盖层 = 把已翻出
+///   窗口盖回（乒乓回退）。翻出窗口不在当前栈（跨位置）时盖层可正常作为目标。
+pub fn pick_target(stack: &[isize], fg_root: isize, raised: &[Raised]) -> Option<isize> {
+    let is_out = |h: isize| raised.iter().any(|r| r.target == h);
+    let is_live_cover = |h: isize| {
+        raised
+            .iter()
+            .any(|r| r.cover == h && stack.contains(&r.target))
+    };
+    stack.iter().skip(1).copied().find(|&h| {
+        h != fg_root && !is_out(h) && !is_live_cover(h)
+    })
+}
+
+/// 翻出记录按当前位置拆分（纯函数）：target 出现在当前栈中的记录保留
+/// （同链路逐层下挖，已翻出层保持显示）；不在栈中的记录待收起
+/// （跨位置切换：一次触发 = 收起旧位置翻出窗口 + 翻出新目标）。
+/// 返回 (保留, 待收起)，均保持原翻出顺序（收起按翻出顺序还原原 Z 序）。
+pub fn split_by_stack<'a>(raised: &'a [Raised], stack: &[isize]) -> (Vec<&'a Raised>, Vec<&'a Raised>) {
+    raised.iter().partition(|r| stack.contains(&r.target))
 }
 
 const SYSTEM_CLASSES: [&str; 4] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
@@ -197,19 +225,76 @@ mod tests {
 
     #[test]
     fn pick_target_rules() {
-        assert_eq!(pick_target(&[], 1), None, "无窗口");
-        assert_eq!(pick_target(&[10], 1), None, "仅一层");
-        assert_eq!(pick_target(&[10, 20], 10), Some(20), "常规：前台在顶，取第二层");
+        assert_eq!(pick_target(&[], 1, &[]), None, "无窗口");
+        assert_eq!(pick_target(&[10], 1, &[]), None, "仅一层");
+        assert_eq!(pick_target(&[10, 20], 10, &[]), Some(20), "常规：前台在顶，取第二层");
         assert_eq!(
-            pick_target(&[10, 20, 30], 20),
+            pick_target(&[10, 20, 30], 20, &[]),
             Some(30),
             "第二层为前台则跳过取更深层"
         );
         assert_eq!(
-            pick_target(&[10, 20], 20),
+            pick_target(&[10, 20], 20, &[]),
             None,
             "顶层下仅前台层（置顶悬浮窗压着前台）→ 无目标"
         );
-        assert_eq!(pick_target(&[10, 20, 30], 99), Some(20), "前台不在栈中时取第二层");
+        assert_eq!(pick_target(&[10, 20, 30], 99, &[]), Some(20), "前台不在栈中时取第二层");
+    }
+
+    #[test]
+    fn pick_target_dig_deeper() {
+        // 栈 [X1(已翻出), T(其盖层), X2]：X1 已在最前、重翻 T 会把 X1 盖回 → 取 X2
+        let raised = [Raised { target: 11, cover: 10 }];
+        assert_eq!(pick_target(&[11, 10, 12], 11, &raised), Some(12), "逐层下挖");
+    }
+
+    #[test]
+    fn pick_target_chain_exhausted() {
+        // 栈 [X2, X1, T]：全部为已翻出层/同链路盖层 → 无目标（触发收起）
+        let raised = [
+            Raised { target: 11, cover: 10 },
+            Raised { target: 12, cover: 11 },
+        ];
+        assert_eq!(pick_target(&[12, 11, 10], 12, &raised), None, "挖尽 → 收起");
+    }
+
+    #[test]
+    fn pick_target_cover_of_absent_out_window() {
+        // 翻出窗口 X1 不在当前栈（跨位置）：其盖层 T 可作为新目标正常翻出
+        let raised = [Raised { target: 11, cover: 10 }];
+        assert_eq!(
+            pick_target(&[20, 10, 21], 20, &raised),
+            Some(10),
+            "跨位置：盖层本身可被翻出"
+        );
+        // 对照：X1 仍在当前栈中时 T 被跳过（防乒乓回退）
+        assert_eq!(
+            pick_target(&[20, 11, 10, 21], 20, &raised),
+            Some(21),
+            "同链路：跳过盖层取更深层"
+        );
+    }
+
+    #[test]
+    fn split_by_stack_rules() {
+        let raised = [
+            Raised { target: 11, cover: 10 }, // X1 在栈中 → 保留（同链路下挖）
+            Raised { target: 21, cover: 20 }, // Y1 不在栈中 → 待收起（跨位置）
+        ];
+        let (keep, restore) = split_by_stack(&raised, &[11, 10]);
+        assert_eq!(keep.len(), 1, "栈中保留 1 条");
+        assert_eq!(keep[0].target, 11);
+        assert_eq!(restore.len(), 1, "栈外收起 1 条");
+        assert_eq!(restore[0].target, 21);
+
+        // 当前栈与所有翻出窗口无关 → 全部收起（无目标收起分支）
+        let (keep2, restore2) = split_by_stack(&raised, &[30, 31]);
+        assert!(keep2.is_empty());
+        assert_eq!(restore2.len(), 2);
+
+        // 顺序保持：收起按翻出顺序
+        let (_, restore3) = split_by_stack(&raised, &[31, 30]);
+        assert_eq!(restore3[0].target, 11);
+        assert_eq!(restore3[1].target, 21);
     }
 }

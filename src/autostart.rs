@@ -6,7 +6,7 @@ use std::io;
 use windows_registry::CURRENT_USER;
 
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const VALUE_NAME: &str = "FastTabClick";
+const VALUE_NAME: &str = "WinPingPangTab";
 
 fn io_err(e: impl std::fmt::Display) -> io::Error {
     io::Error::other(e.to_string())
