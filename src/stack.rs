@@ -5,7 +5,7 @@ use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindowThreadProcessId,
+    EnumWindows, GetClassNameW, GetWindowThreadProcessId, WindowFromPoint,
 };
 
 /// 窗口候选的属性集合——把 Win32 查询与过滤决策分离，谓词可单测。
@@ -77,13 +77,27 @@ struct EnumCtx {
 }
 
 /// 构建 pt 处的窗口栈（Win32 部分）：EnumWindows 天然按 Z 序从顶到底回调。
+/// 截断规则：以 `WindowFromPoint`（鼠标事件实际命中的窗口，系统自动跳过
+/// 点击穿透的透明层）为锚，栈中位于锚之上的层全部丢弃——鼠标特效软件
+/// （如 mfcmouseeffect.exe）的置顶透明全屏窗口会通过常规过滤混入每个点
+/// 的栈顶（实测：污染 cover 记录 + 触发剪枝误判"已被盖回"），锚定后
+/// 栈顶恒为用户实际看到/点到的窗口。锚不在栈中（被过滤，如任务栏）时
+/// 保留全栈。
 pub fn build_stack(pt: POINT) -> Vec<isize> {
     let mut ctx = EnumCtx { pt, out: Vec::new() };
     let ctx_ptr = &mut ctx as *mut EnumCtx as isize;
     unsafe {
         let _ = EnumWindows(Some(enum_proc), LPARAM(ctx_ptr));
     }
-    ctx.out
+    let hit_root = unsafe { WindowFromPoint(pt) };
+    if hit_root.0.is_null() {
+        return ctx.out;
+    }
+    let anchor = crate::proc_cache::root_of(hit_root).0 as isize;
+    match ctx.out.iter().position(|&h| h == anchor) {
+        Some(i) => ctx.out.split_off(i),
+        None => ctx.out,
+    }
 }
 
 unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
